@@ -11,6 +11,7 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Dict, List, Optional
 from dataclasses import dataclass
+from ast import literal_eval
 
 import numpy as np
 import torch
@@ -122,6 +123,22 @@ def _collate_frames(
         out[i, : v.size(0)] = v
     return out
 
+def _pad_sequence(sample, seq_length):
+    to_pad = seq_length - sample.shape[0]
+    sample = torch.cat([sample] + [torch.zeros(sample.size(-1)).unsqueeze(dim=0) for i in range(to_pad)])
+    return sample
+
+def _collate_distributions(samples):
+    max_seq_length = max([s.shape[0] for s in samples])
+    return torch.cat([_pad_sequence(s, max_seq_length).unsqueeze(dim=0) for s in samples], dim=0)
+
+def restore_pair(pair, vocab_size):
+    p = torch.zeros(vocab_size)
+    probs = torch.tensor(pair[1])
+    p[pair[0]] = probs
+    residue = 1 - probs.sum()
+    p[p == 0] = residue / (p.size(-1) - probs.size(-1))
+    return p
 
 @dataclass
 class SpeechToTextDatasetItem(object):
@@ -129,7 +146,7 @@ class SpeechToTextDatasetItem(object):
     source: torch.Tensor
     target: Optional[torch.Tensor] = None
     speaker_id: Optional[int] = None
-
+    teacher_probs: Optional[torch.Tensor] = None
 
 class SpeechToTextDataset(FairseqDataset):
     LANG_TAG_TEMPLATE = "<lang:{}>"
@@ -144,6 +161,7 @@ class SpeechToTextDataset(FairseqDataset):
         src_texts: Optional[List[str]] = None,
         tgt_texts: Optional[List[str]] = None,
         speakers: Optional[List[str]] = None,
+        teacher_probs: Optional[List[List[int]]] = None,
         src_langs: Optional[List[str]] = None,
         tgt_langs: Optional[List[str]] = None,
         ids: Optional[List[str]] = None,
@@ -171,7 +189,9 @@ class SpeechToTextDataset(FairseqDataset):
         self.src_texts, self.tgt_texts = src_texts, tgt_texts
         self.src_langs, self.tgt_langs = src_langs, tgt_langs
         self.speakers = speakers
+        self.teacher_probs = teacher_probs
         self.tgt_dict = tgt_dict
+        self.tgt_vocab_size = len(self.tgt_dict)
         self.check_tgt_lang_tag()
         self.ids = ids
         self.shuffle = cfg.shuffle if is_train_split else False
@@ -283,8 +303,17 @@ class SpeechToTextDataset(FairseqDataset):
         speaker_id = None
         if self.speaker_to_id is not None:
             speaker_id = self.speaker_to_id[self.speakers[index]]
+        teacher_probs = self.teacher_probs[index]
+        if len(teacher_probs) > 0:
+            teacher_probs = torch.cat([restore_pair(p, self.tgt_vocab_size).unsqueeze(dim=0) for p in teacher_probs])
+        else:
+            teacher_probs = torch.tensor([])
         return SpeechToTextDatasetItem(
-            index=index, source=source, target=target, speaker_id=speaker_id
+            index=index,
+            source=source,
+            target=target,
+            speaker_id=speaker_id,
+            teacher_probs=teacher_probs,
         )
 
     def __len__(self):
@@ -297,6 +326,7 @@ class SpeechToTextDataset(FairseqDataset):
             return {}
         indices = torch.tensor([x.index for x in samples], dtype=torch.long)
         frames = _collate_frames([x.source for x in samples], self.cfg.use_audio_input)
+        teacher_probs = _collate_distributions([x.teacher_probs for x in samples])
         # sort samples by descending number of frames
         n_frames = torch.tensor([x.source.size(0) for x in samples], dtype=torch.long)
         n_frames, order = n_frames.sort(descending=True)
@@ -346,6 +376,7 @@ class SpeechToTextDataset(FairseqDataset):
             "net_input": net_input,
             "speaker": speaker,
             "target": target,
+            "teacher_probs": teacher_probs,
             "target_lengths": target_lengths,
             "ntokens": ntokens,
             "nsentences": len(samples),
@@ -388,6 +419,7 @@ class SpeechToTextDatasetCreator(object):
     # optional columns
     KEY_SPEAKER, KEY_SRC_TEXT = "speaker", "src_text"
     KEY_SRC_LANG, KEY_TGT_LANG = "src_lang", "tgt_lang"
+    KEY_TEACHER_PROBS = "teacher_probs"
     # default values
     DEFAULT_SPEAKER = DEFAULT_SRC_TEXT = DEFAULT_LANG = ""
 
@@ -411,6 +443,7 @@ class SpeechToTextDatasetCreator(object):
         tgt_texts = [s[cls.KEY_TGT_TEXT] for s in samples]
         src_texts = [s.get(cls.KEY_SRC_TEXT, cls.DEFAULT_SRC_TEXT) for s in samples]
         speakers = [s.get(cls.KEY_SPEAKER, cls.DEFAULT_SPEAKER) for s in samples]
+        teacher_probs = [literal_eval(s.get(cls.KEY_TEACHER_PROBS, '[]')) for s in samples]
         src_langs = [s.get(cls.KEY_SRC_LANG, cls.DEFAULT_LANG) for s in samples]
         tgt_langs = [s.get(cls.KEY_TGT_LANG, cls.DEFAULT_LANG) for s in samples]
         return SpeechToTextDataset(
@@ -422,6 +455,7 @@ class SpeechToTextDatasetCreator(object):
             src_texts=src_texts,
             tgt_texts=tgt_texts,
             speakers=speakers,
+            teacher_probs=teacher_probs,
             src_langs=src_langs,
             tgt_langs=tgt_langs,
             ids=ids,
@@ -467,6 +501,8 @@ class SpeechToTextDatasetCreator(object):
 
     @classmethod
     def _load_samples_from_tsv(cls, root: str, split: str):
+        if split == 'train':
+            split = 'train_run_kd'
         tsv_path = Path(root) / f"{split}.tsv"
         if not tsv_path.is_file():
             raise FileNotFoundError(f"Dataset not found: {tsv_path}")

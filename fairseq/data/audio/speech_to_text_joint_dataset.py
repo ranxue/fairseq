@@ -6,6 +6,7 @@
 import logging
 from pathlib import Path
 from typing import Dict, List, Optional, NamedTuple
+from ast import literal_eval
 
 import torch
 from fairseq.data import (
@@ -66,6 +67,7 @@ class SpeechToTextJointDatasetItem(NamedTuple):
     index: int
     source: torch.Tensor
     target: Optional[torch.Tensor] = None
+    teacher_probs: Optional[torch.Tensor] = None
     src_txt_tokens: Optional[torch.Tensor] = None
     tgt_lang_tag: Optional[int] = None
     src_lang_tag: Optional[int] = None
@@ -86,6 +88,7 @@ class SpeechToTextJointDataset(SpeechToTextDataset):
         src_texts: Optional[List[str]] = None,
         tgt_texts: Optional[List[str]] = None,
         speakers: Optional[List[str]] = None,
+        teacher_probs: Optional[List[List[int]]] = None,
         src_langs: Optional[List[str]] = None,
         tgt_langs: Optional[List[str]] = None,
         ids: Optional[List[str]] = None,
@@ -108,6 +111,7 @@ class SpeechToTextJointDataset(SpeechToTextDataset):
             src_texts=src_texts,
             tgt_texts=tgt_texts,
             speakers=speakers,
+            teacher_probs=teacher_probs,
             src_langs=src_langs,
             tgt_langs=tgt_langs,
             ids=ids,
@@ -157,6 +161,7 @@ class SpeechToTextJointDataset(SpeechToTextDataset):
             index=index,
             source=s2t_dataset_item.source,
             target=s2t_dataset_item.target,
+            teacher_probs=s2t_dataset_item.teacher_probs,
             src_txt_tokens=src_tokens,
             tgt_lang_tag=tgt_lang_tag,
             src_lang_tag=src_lang_tag,
@@ -217,6 +222,7 @@ class SpeechToTextJointDataset(SpeechToTextDataset):
             "id": s2t_out["id"],
             "net_input": net_input,
             "target": s2t_out["target"],
+            "teacher_probs": s2t_out["teacher_probs"],
             "target_lengths": s2t_out["target_lengths"],
             "ntokens": s2t_out["ntokens"],
             "nsentences": len(samples),
@@ -250,6 +256,7 @@ class SpeechToTextJointDatasetCreator(SpeechToTextDatasetCreator):
         tgt_texts = [s[cls.KEY_TGT_TEXT] for s in samples]
         src_texts = [s.get(cls.KEY_SRC_TEXT, cls.DEFAULT_SRC_TEXT) for s in samples]
         speakers = [s.get(cls.KEY_SPEAKER, cls.DEFAULT_SPEAKER) for s in samples]
+        teacher_probs = [literal_eval(s.get(cls.KEY_TEACHER_PROBS, '[]')) for s in samples]
         src_langs = [s.get(cls.KEY_SRC_LANG, cls.DEFAULT_LANG) for s in samples]
         tgt_langs = [s.get(cls.KEY_TGT_LANG, cls.DEFAULT_LANG) for s in samples]
         tgt_alignment = None
@@ -264,6 +271,7 @@ class SpeechToTextJointDatasetCreator(SpeechToTextDatasetCreator):
             src_texts=src_texts,
             tgt_texts=tgt_texts,
             speakers=speakers,
+            teacher_probs=teacher_probs,
             src_langs=src_langs,
             tgt_langs=tgt_langs,
             ids=ids,
