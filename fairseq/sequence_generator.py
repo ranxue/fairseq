@@ -185,6 +185,8 @@ class SequenceGenerator(nn.Module):
                 the list of constraints
             bos_token (int, optional): beginning of sentence token
                 (default: self.eos)
+            bos_tokens (torch.LongTensor, optional): beginning of
+                sentence token per data entry
         """
         return self._generate(sample, **kwargs)
 
@@ -194,6 +196,7 @@ class SequenceGenerator(nn.Module):
         prefix_tokens: Optional[Tensor] = None,
         constraints: Optional[Tensor] = None,
         bos_token: Optional[int] = None,
+        bos_tokens: Optional[Tensor] = None
     ):
         incremental_states = torch.jit.annotate(
             List[Dict[str, Dict[str, Optional[Tensor]]]],
@@ -275,7 +278,10 @@ class SequenceGenerator(nn.Module):
             .long()
             .fill_(self.pad)
         )  # +2 for eos and pad
-        tokens[:, 0] = self.eos if bos_token is None else bos_token
+        if bos_tokens is None:
+            tokens[:, 0] = self.eos if bos_token is None else bos_token
+        else:
+            tokens[:, 0] = torch.cat([bos_tokens for i in range(beam_size)], dim=0)
         attn: Optional[Tensor] = None
 
         # A list that indicates candidates that should be ignored.
