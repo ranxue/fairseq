@@ -15,6 +15,7 @@ from ast import literal_eval
 
 import numpy as np
 import torch
+import torch.nn.functional as F
 from fairseq.data import (
     ConcatDataset,
     Dictionary,
@@ -171,6 +172,7 @@ class SpeechToTextDataset(FairseqDataset):
         n_frames_per_step=1,
         speaker_to_id=None,
         append_eos=True,
+        normalize=True,
     ):
         self.split, self.is_train_split = split, is_train_split
         self.cfg = cfg
@@ -207,6 +209,7 @@ class SpeechToTextDataset(FairseqDataset):
 
         self.tgt_lens = self.get_tgt_lens_and_check_oov()
         self.append_eos = append_eos
+        self.normalize = normalize
 
         logger.info(self.__repr__())
 
@@ -282,6 +285,10 @@ class SpeechToTextDataset(FairseqDataset):
             assert not self.cfg.use_audio_input
             source = self.feature_transforms(source)
         source = torch.from_numpy(source).float()
+        if self.normalize:
+            with torch.no_grad():
+                source = F.layer_norm(source, source.shape)
+                #logger.info("audio normalized.")
         return source
 
     def __getitem__(self, index: int) -> SpeechToTextDatasetItem:
