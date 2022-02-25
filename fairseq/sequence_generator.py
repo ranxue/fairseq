@@ -281,7 +281,7 @@ class SequenceGenerator(nn.Module):
         if bos_tokens is None:
             tokens[:, 0] = self.eos if bos_token is None else bos_token
         else:
-            tokens[:, 0] = torch.cat([bos_tokens for i in range(beam_size)], dim=0)
+            tokens[:, 0] = bos_tokens.repeat_interleave(beam_size)
         attn: Optional[Tensor] = None
 
         # A list that indicates candidates that should be ignored.
