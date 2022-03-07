@@ -102,6 +102,7 @@ class SpeechToTextJointDataset(SpeechToTextDataset):
         alignment: Optional[List[str]] = None,
         use_src_lang_id: Optional[int] = 0,
         max_target_len: Optional[int] = 200,
+        random_pad_tokens: Optional[int] = 0,
     ):
         super().__init__(
             split,
@@ -120,6 +121,7 @@ class SpeechToTextJointDataset(SpeechToTextDataset):
             pre_tokenizer=pre_tokenizer,
             bpe_tokenizer=bpe_tokenizer,
             append_eos=append_eos,
+            random_pad_tokens=random_pad_tokens,
         )
 
         self.src_dict = src_dict
@@ -254,6 +256,7 @@ class SpeechToTextJointDatasetCreator(SpeechToTextDatasetCreator):
         src_bpe_tokenizer,
         append_eos,
         use_src_lang_id,
+        random_pad_tokens,
     ) -> SpeechToTextJointDataset:
         audio_root = Path(cfg.audio_root)
         ids = [s[cls.KEY_ID] for s in samples]
@@ -290,6 +293,7 @@ class SpeechToTextJointDatasetCreator(SpeechToTextDatasetCreator):
             append_eos=append_eos,
             alignment=tgt_alignment,
             use_src_lang_id=use_src_lang_id,
+            random_pad_tokens=random_pad_tokens,
         )
 
     @classmethod
@@ -307,6 +311,7 @@ class SpeechToTextJointDatasetCreator(SpeechToTextDatasetCreator):
         src_bpe_tokenizer,
         append_eos: bool,
         use_src_lang_id: int,
+        random_pad_tokens: int,
     ) -> SpeechToTextJointDataset:
         samples = cls._load_samples_from_tsv(root, split)
         return cls._from_list(
@@ -322,6 +327,7 @@ class SpeechToTextJointDatasetCreator(SpeechToTextDatasetCreator):
             src_bpe_tokenizer,
             append_eos,
             use_src_lang_id,
+            random_pad_tokens,
         )
 
     @classmethod
@@ -341,6 +347,7 @@ class SpeechToTextJointDatasetCreator(SpeechToTextDatasetCreator):
         seed: int,
         append_eos: Optional[bool] = True,
         use_src_lang_id: Optional[int] = 0,
+        random_pad_tokens: Optional[int] = 0,
     ) -> SpeechToTextJointDataset:
         datasets = [
             cls._from_tsv(
@@ -356,6 +363,7 @@ class SpeechToTextJointDatasetCreator(SpeechToTextDatasetCreator):
                 src_bpe_tokenizer,
                 append_eos=append_eos,
                 use_src_lang_id=use_src_lang_id,
+                random_pad_tokens=random_pad_tokens,
             )
             for split in splits.split(",")
         ]

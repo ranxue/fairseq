@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Dict, List, Optional
 from dataclasses import dataclass
 from ast import literal_eval
+import random
 
 import numpy as np
 import torch
@@ -171,6 +172,7 @@ class SpeechToTextDataset(FairseqDataset):
         n_frames_per_step=1,
         speaker_to_id=None,
         append_eos=True,
+        random_pad_tokens=0,
     ):
         self.split, self.is_train_split = split, is_train_split
         self.cfg = cfg
@@ -195,6 +197,7 @@ class SpeechToTextDataset(FairseqDataset):
         self.check_tgt_lang_tag()
         self.ids = ids
         self.shuffle = cfg.shuffle if is_train_split else False
+        self.random_pad_tokens = random_pad_tokens
 
         self.feature_transforms = CompositeAudioFeatureTransform.from_config_dict(
             self.cfg.get_feature_transforms(split, is_train_split)
@@ -308,6 +311,11 @@ class SpeechToTextDataset(FairseqDataset):
             teacher_probs = torch.cat([restore_pair(p, self.tgt_vocab_size).unsqueeze(dim=0) for p in teacher_probs])
         else:
             teacher_probs = torch.tensor([])
+        if self.random_pad_tokens == 0:
+            padding_tokens = 0
+        else:
+            padding_tokens = random.randrange(0, self.random_pad_tokens)
+        source = torch.cat([torch.zeros(padding_tokens), source])
         return SpeechToTextDatasetItem(
             index=index,
             source=source,
