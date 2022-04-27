@@ -68,6 +68,7 @@ class SpeechToTextJointDatasetItem(NamedTuple):
     source: torch.Tensor
     target: Optional[torch.Tensor] = None
     teacher_probs: Optional[torch.Tensor] = None
+    audio_id: Optional[str] = None
     src_txt_tokens: Optional[torch.Tensor] = None
     tgt_lang_tag: Optional[int] = None
     src_lang_tag: Optional[int] = None
@@ -162,6 +163,7 @@ class SpeechToTextJointDataset(SpeechToTextDataset):
             source=s2t_dataset_item.source,
             target=s2t_dataset_item.target,
             teacher_probs=s2t_dataset_item.teacher_probs,
+            audio_id=self.ids[index],
             src_txt_tokens=src_tokens,
             tgt_lang_tag=tgt_lang_tag,
             src_lang_tag=src_lang_tag,
@@ -223,6 +225,7 @@ class SpeechToTextJointDataset(SpeechToTextDataset):
             "net_input": net_input,
             "target": s2t_out["target"],
             "teacher_probs": s2t_out["teacher_probs"],
+            "audio_ids": s2t_out["audio_ids"],
             "target_lengths": s2t_out["target_lengths"],
             "ntokens": s2t_out["ntokens"],
             "nsentences": len(samples),

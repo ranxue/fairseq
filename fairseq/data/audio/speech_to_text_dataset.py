@@ -147,6 +147,7 @@ class SpeechToTextDatasetItem(object):
     target: Optional[torch.Tensor] = None
     speaker_id: Optional[int] = None
     teacher_probs: Optional[torch.Tensor] = None
+    audio_id: Optional[str] = None
 
 class SpeechToTextDataset(FairseqDataset):
     LANG_TAG_TEMPLATE = "<lang:{}>"
@@ -327,6 +328,7 @@ class SpeechToTextDataset(FairseqDataset):
         indices = torch.tensor([x.index for x in samples], dtype=torch.long)
         frames = _collate_frames([x.source for x in samples], self.cfg.use_audio_input)
         teacher_probs = _collate_distributions([x.teacher_probs for x in samples])
+        audio_ids = [x.audio_id for x in samples]
         # sort samples by descending number of frames
         n_frames = torch.tensor([x.source.size(0) for x in samples], dtype=torch.long)
         n_frames, order = n_frames.sort(descending=True)
@@ -377,6 +379,7 @@ class SpeechToTextDataset(FairseqDataset):
             "speaker": speaker,
             "target": target,
             "teacher_probs": teacher_probs,
+            "audio_ids": audio_ids,
             "target_lengths": target_lengths,
             "ntokens": ntokens,
             "nsentences": len(samples),
