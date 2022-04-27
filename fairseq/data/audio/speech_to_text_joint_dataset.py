@@ -102,6 +102,8 @@ class SpeechToTextJointDataset(SpeechToTextDataset):
         append_eos: Optional[bool] = True,
         alignment: Optional[List[str]] = None,
         use_src_lang_id: Optional[int] = 0,
+        max_target_len: Optional[int] = 200,
+        random_pad_tokens: Optional[int] = 0,
     ):
         super().__init__(
             split,
@@ -120,6 +122,7 @@ class SpeechToTextJointDataset(SpeechToTextDataset):
             pre_tokenizer=pre_tokenizer,
             bpe_tokenizer=bpe_tokenizer,
             append_eos=append_eos,
+            random_pad_tokens=random_pad_tokens,
         )
 
         self.src_dict = src_dict
@@ -127,6 +130,7 @@ class SpeechToTextJointDataset(SpeechToTextDataset):
         self.src_bpe_tokenizer = src_bpe_tokenizer
         self.alignment = None
         self.use_src_lang_id = use_src_lang_id
+        self.max_target_len = max_target_len
         if alignment is not None:
             self.alignment = [
                 [float(s) for s in sample.split()] for sample in alignment
@@ -158,10 +162,14 @@ class SpeechToTextJointDataset(SpeechToTextDataset):
         if self.alignment is not None:
             ali = torch.Tensor(self.alignment[index]).float()
 
+        if s2t_dataset_item.target is not None and len(s2t_dataset_item.target) > self.max_target_len:
+            tgt_tokens = torch.cat((s2t_dataset_item.target[:self.max_target_len - 1], torch.tensor([self.src_dict.eos()])))
+        else:
+            tgt_tokens = s2t_dataset_item.target
         return SpeechToTextJointDatasetItem(
             index=index,
             source=s2t_dataset_item.source,
-            target=s2t_dataset_item.target,
+            target=tgt_tokens,
             teacher_probs=s2t_dataset_item.teacher_probs,
             audio_id=self.ids[index],
             src_txt_tokens=src_tokens,
@@ -251,6 +259,7 @@ class SpeechToTextJointDatasetCreator(SpeechToTextDatasetCreator):
         src_bpe_tokenizer,
         append_eos,
         use_src_lang_id,
+        random_pad_tokens,
     ) -> SpeechToTextJointDataset:
         audio_root = Path(cfg.audio_root)
         ids = [s[cls.KEY_ID] for s in samples]
@@ -287,6 +296,7 @@ class SpeechToTextJointDatasetCreator(SpeechToTextDatasetCreator):
             append_eos=append_eos,
             alignment=tgt_alignment,
             use_src_lang_id=use_src_lang_id,
+            random_pad_tokens=random_pad_tokens,
         )
 
     @classmethod
@@ -304,6 +314,7 @@ class SpeechToTextJointDatasetCreator(SpeechToTextDatasetCreator):
         src_bpe_tokenizer,
         append_eos: bool,
         use_src_lang_id: int,
+        random_pad_tokens: int,
     ) -> SpeechToTextJointDataset:
         samples = cls._load_samples_from_tsv(root, split)
         return cls._from_list(
@@ -319,6 +330,7 @@ class SpeechToTextJointDatasetCreator(SpeechToTextDatasetCreator):
             src_bpe_tokenizer,
             append_eos,
             use_src_lang_id,
+            random_pad_tokens,
         )
 
     @classmethod
@@ -338,6 +350,7 @@ class SpeechToTextJointDatasetCreator(SpeechToTextDatasetCreator):
         seed: int,
         append_eos: Optional[bool] = True,
         use_src_lang_id: Optional[int] = 0,
+        random_pad_tokens: Optional[int] = 0,
     ) -> SpeechToTextJointDataset:
         datasets = [
             cls._from_tsv(
@@ -353,6 +366,7 @@ class SpeechToTextJointDatasetCreator(SpeechToTextDatasetCreator):
                 src_bpe_tokenizer,
                 append_eos=append_eos,
                 use_src_lang_id=use_src_lang_id,
+                random_pad_tokens=random_pad_tokens,
             )
             for split in splits.split(",")
         ]
