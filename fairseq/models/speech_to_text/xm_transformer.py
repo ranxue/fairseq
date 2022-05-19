@@ -27,7 +27,6 @@ from fairseq.modules.layer_norm import LayerNorm
 
 logger = logging.getLogger(__name__)
 
-
 class Conv1dAdaptor(nn.Module):
     def __init__(
         self,
@@ -110,6 +109,32 @@ class Conv1dAdaptor(nn.Module):
             out_padding_mask = lengths_to_padding_mask(out_lens.long())
         return x, out_padding_mask
 
+class MultiHeadAdaptor(nn.Module):
+    def __init__(self, num_heads, in_dim, out_dim, **kwargs):
+        super().__init__()
+        self.num_heads = num_heads
+        self.in_dim = in_dim
+        self.out_dim = out_dim
+        self.heads = nn.ModuleList(
+            [
+                Conv1dAdaptor(
+                    in_dim,
+                    out_dim,
+                    **kwargs
+                ) for i in range(num_heads)
+            ]
+        )
+        self.output_projection_layer = nn.Linear(out_dim * num_heads, out_dim)
+
+    def forward(self, x, *args, **kwargs):
+        res = []
+        for head in self.heads:
+            y, attention_mask = head(x, *args, **kwargs)
+            res.append(y)
+        x = torch.cat(res, dim=-1)
+        x = self.output_projection_layer(x)
+
+        return x, attention_mask
 
 def add_wav2vec_asr_args(parser):
     parser.add_argument("--w2v-path", help="path to wav2vec 2.0 model")
@@ -246,7 +271,8 @@ class Wav2VecEncoderWithAdaptor(FairseqEncoder):
     def build_adaptor(self, args):
         adaptor = None
         if args.adaptor_n_layers > 0:
-            adaptor = Conv1dAdaptor(
+            adaptor = MultiHeadAdaptor(
+                args.adaptor_heads,
                 args.decoder_embed_dim,
                 args.decoder_embed_dim,
                 n_layers=args.adaptor_n_layers,
@@ -630,6 +656,7 @@ def set_default_adaptor_args(args):
     args.adaptor_layerdrop = getattr(args, "adaptor_layerdrop", 0.0)
     args.adaptor_layernorm = getattr(args, "adaptor_layernorm", False)
     args.adaptor_proj = getattr(args, "adaptor_proj", False)
+    args.adaptor_heads = getattr(args, "adaptor_heads", 8)
 
 
 def set_default_transformer_decoder_args(args):
