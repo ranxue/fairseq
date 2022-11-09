@@ -331,13 +331,17 @@ class TransformerDecoderBase(FairseqIncrementalDecoder):
         # decoder layers
         attn: Optional[Tensor] = None
         inner_states: List[Optional[Tensor]] = [x]
+        all_layer_out = []
+        all_attn_out = []
+        all_attn_weight = []
+
         for idx, layer in enumerate(self.layers):
             if incremental_state is None and not full_context_alignment:
                 self_attn_mask = self.buffered_future_mask(x)
             else:
                 self_attn_mask = None
 
-            x, layer_attn, _ = layer(
+            x, layer_attn, _ , attn_out = layer(
                 x,
                 enc,
                 padding_mask,
@@ -346,7 +350,10 @@ class TransformerDecoderBase(FairseqIncrementalDecoder):
                 self_attn_padding_mask=self_attn_padding_mask,
                 need_attn=bool((idx == alignment_layer)),
                 need_head_weights=bool((idx == alignment_layer)),
-            )
+            )       # x, attn, self_attn_state, attn_out
+            all_layer_out.append(x)
+            all_attn_out.append(attn_out)
+            all_attn_weight.append(layer_attn)
             inner_states.append(x)
             if layer_attn is not None and idx == alignment_layer:
                 attn = layer_attn.float().to(x)

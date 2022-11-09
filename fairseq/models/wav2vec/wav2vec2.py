@@ -670,15 +670,18 @@ class Wav2Vec2Model(BaseFairseqModel):
             y = unmasked_features
             mask_indices = None
 
-        x, layer_results = self.encoder(x, padding_mask=padding_mask, layer=layer)
+        extras = {}
+        x, layer_results, extras = self.encoder(x, padding_mask=padding_mask, layer=layer)
 
         if features_only:
-            return {
+            ret = {
                 "x": x,
                 "padding_mask": padding_mask,
                 "features": unmasked_features,
                 "layer_results": layer_results,
             }
+            ret.update(extras)
+            return ret
 
         if self.quantizer:
             if self.negatives_from_everywhere:
@@ -998,12 +1001,12 @@ class TransformerEncoder(nn.Module):
         self.apply(init_bert_params)
 
     def forward(self, x, padding_mask=None, layer=None):
-        x, layer_results = self.extract_features(x, padding_mask, layer)
+        x, layer_results, extras = self.extract_features(x, padding_mask, layer)
 
         if self.layer_norm_first and layer is None:
             x = self.layer_norm(x)
 
-        return x, layer_results
+        return x, layer_results, extras
 
     def extract_features(
         self,
@@ -1040,13 +1043,19 @@ class TransformerEncoder(nn.Module):
         x = x.transpose(0, 1)
 
         layer_results = []
+        w2v_layer_out = []
+        w2v_attn_out = []
+        w2v_attn_weight = []
         r = None
         for i, layer in enumerate(self.layers):
             dropout_probability = np.random.random() if self.layerdrop > 0 else 1
             if not self.training or (dropout_probability > self.layerdrop):
-                x, (z, lr) = layer(
-                    x, self_attn_padding_mask=padding_mask, need_weights=False
+                x, (z, lr), attn_out = layer(
+                    x, self_attn_padding_mask=padding_mask, need_weights=True
                 )
+                w2v_layer_out.append(x)
+                w2v_attn_out.append(attn_out)
+                w2v_attn_weight.append(z)
                 if i >= min_layer:
                     layer_results.append((x, z, lr))
             if i == tgt_layer:
@@ -1072,7 +1081,7 @@ class TransformerEncoder(nn.Module):
 
             layer_results = [undo_pad(*u) for u in layer_results]
 
-        return x, layer_results
+        return x, layer_results, {"w2v_layer_out":w2v_layer_out, "w2v_attn_out":w2v_attn_out, "w2v_attn_weight": w2v_attn_weight}
 
     def max_positions(self):
         """Maximum output length supported by the encoder."""
@@ -1230,7 +1239,7 @@ class TransformerSentenceEncoderLayer(nn.Module):
         modules similar to the original Transformer imlementation.
         """
         residual = x
-
+        attn_out = None
         if self.layer_norm_first:
             x = self.self_attn_layer_norm(x)
             x, attn = self.self_attn(
@@ -1239,8 +1248,9 @@ class TransformerSentenceEncoderLayer(nn.Module):
                 value=x,
                 key_padding_mask=self_attn_padding_mask,
                 attn_mask=self_attn_mask,
-                need_weights=False,
+                need_weights=need_weights,
             )
+            attn_out = x
             x = self.dropout1(x)
             x = residual + x
 
@@ -1260,9 +1270,9 @@ class TransformerSentenceEncoderLayer(nn.Module):
                 key=x,
                 value=x,
                 key_padding_mask=self_attn_padding_mask,
-                need_weights=False,
+                need_weights=need_weights,
             )
-
+            attn_out = x
             x = self.dropout1(x)
             x = residual + x
 
@@ -1279,4 +1289,4 @@ class TransformerSentenceEncoderLayer(nn.Module):
             x = residual + x
             x = self.final_layer_norm(x)
 
-        return x, (attn, layer_result)
+        return x, (attn, layer_result), attn_out

@@ -216,6 +216,9 @@ class TransformerEncoderBase(FairseqEncoder):
 
         encoder_states = []
         fc_results = []
+        all_layer_out = []
+        all_attn_out = []
+        all_attn_weight = []
 
         if return_all_hiddens:
             encoder_states.append(x)
@@ -224,18 +227,35 @@ class TransformerEncoderBase(FairseqEncoder):
         for layer in self.layers:
             lr = layer(
                 x, encoder_padding_mask=encoder_padding_mask if has_pads else None
-            )
+            ) # --> x, fc_result, attn_out, attn_weight
 
-            if isinstance(lr, tuple) and len(lr) == 2:
-                x, fc_result = lr
+            if isinstance(lr, tuple):
+                if len(lr) == 4:
+                    x, fc_result, attn_out, attn_weight = lr
+                elif len(lr) == 3:
+                    x, fc_result, attn_out = lr
+                    attn_weight = None
+                elif len(lr) == 2:
+                    x, fc_result = lr
+                    attn_out = None
+                    attn_weight = None
             else:
                 x = lr
                 fc_result = None
+                attn_out = None
+                attn_weight = None
 
             if return_all_hiddens and not torch.jit.is_scripting():
                 assert encoder_states is not None
                 encoder_states.append(x)
                 fc_results.append(fc_result)
+
+            if x is not None:
+                all_layer_out.append(x)
+            if attn_out is not None:
+                all_attn_out.append(attn_out)
+            if attn_weight is not None:
+                all_attn_weight.append(attn_weight)
 
         if self.layer_norm is not None:
             x = self.layer_norm(x)
@@ -258,6 +278,9 @@ class TransformerEncoderBase(FairseqEncoder):
             "fc_results": fc_results,  # List[T x B x C]
             "src_tokens": [],
             "src_lengths": [src_lengths],
+            "layer_out": all_layer_out,
+            "attn_out": all_attn_out,
+            "attn_weight": all_attn_weight,
         }
 
     @torch.jit.export

@@ -194,14 +194,15 @@ class TransformerEncoderLayerBase(nn.Module):
         residual = x
         if self.normalize_before:
             x = self.self_attn_layer_norm(x)
-        x, _ = self.self_attn(
+        x, attn_weight = self.self_attn(
             query=x,
             key=x,
             value=x,
             key_padding_mask=encoder_padding_mask,
-            need_weights=False,
+            need_weights=True,
             attn_mask=attn_mask,
         )
+        attn_out = x
         x = self.dropout_module(x)
         x = self.residual_connection(x, residual)
         if not self.normalize_before:
@@ -222,8 +223,8 @@ class TransformerEncoderLayerBase(nn.Module):
             x = self.final_layer_norm(x)
 
         if self.return_fc and not torch.jit.is_scripting():
-            return x, fc_result
-        return x
+            return x, fc_result, attn_out, attn_weight
+        return x, None, attn_out, attn_weight  
 
 
 # backward compatible with the legacy argparse format
@@ -489,9 +490,10 @@ class TransformerDecoderLayerBase(nn.Module):
                 key_padding_mask=encoder_padding_mask,
                 incremental_state=incremental_state,
                 static_kv=True,
-                need_weights=need_attn or (not self.training and self.need_attn),
+                need_weights=True or need_attn or (not self.training and self.need_attn),
                 need_head_weights=need_head_weights,
             )
+            attn_out = x
             x = self.dropout_module(x)
             x = self.residual_connection(x, residual)
             if not self.normalize_before:
@@ -523,8 +525,8 @@ class TransformerDecoderLayerBase(nn.Module):
                 ]
             else:
                 self_attn_state = [saved_state["prev_key"], saved_state["prev_value"]]
-            return x, attn, self_attn_state
-        return x, attn, None
+            return x, attn, self_attn_state, attn_out
+        return x, attn, None, attn_out
 
     def make_generation_fast_(self, need_attn: bool = False, **kwargs):
         self.need_attn = need_attn

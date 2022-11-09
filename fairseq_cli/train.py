@@ -98,18 +98,15 @@ def main(cfg: FairseqConfig) -> None:
     logger.info("model: {}".format(model.__class__.__name__))
     logger.info("criterion: {}".format(criterion.__class__.__name__))
     logger.info(
-        "num. shared model params: {:,} (num. trained: {:,})".format(
-            sum(
-                p.numel() for p in model.parameters() if not getattr(p, "expert", False)
-            ),
-            sum(
-                p.numel()
-                for p in model.parameters()
-                if not getattr(p, "expert", False) and p.requires_grad
-            ),
+        "num. total model layers: {:,}, params: {:,}, num. embed: {:,}, num. total-embed: {:,}, num. frozen: {:,}, num. trained: {:,}".format(
+            len([_ for _ in model.named_modules()]),
+            sum(p[1].numel() for e,p in enumerate(model.named_parameters())), 
+            sum(p[1].numel() for e,p in enumerate(model.named_parameters()) if any (tag in p[0] for tag in ['feature', 'emb', 'extract', 'pos'])),
+            sum(p[1].numel() for e,p in enumerate(model.named_parameters()) if not any (tag in p[0] for tag in ['feature', 'emb', 'extract', 'pos'])),
+            sum(p[1].numel() for e,p in enumerate(model.named_parameters()) if p[1].requires_grad==False),
+            sum(p[1].numel() for e,p in enumerate(model.named_parameters()) if p[1].requires_grad),
         )
     )
-
     logger.info(
         "num. expert model params: {} (num. trained: {})".format(
             sum(p.numel() for p in model.parameters() if getattr(p, "expert", False)),
