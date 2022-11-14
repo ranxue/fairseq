@@ -40,10 +40,16 @@ def main(cfg: DictConfig):
 
     if cfg.common_eval.results_path is not None:
         os.makedirs(cfg.common_eval.results_path, exist_ok=True)
-        output_path = os.path.join(
-            cfg.common_eval.results_path,
-            "generate-{}.txt".format(cfg.dataset.gen_subset),
-        )
+        if cfg.task.load_text_only:
+            output_path = os.path.join(
+                cfg.common_eval.results_path,
+                "text-generate-{}.txt".format(cfg.dataset.gen_subset),
+            )
+        else:
+            output_path = os.path.join(
+                cfg.common_eval.results_path,
+                "generate-{}.txt".format(cfg.dataset.gen_subset),
+            )
         with open(output_path, "w", buffering=1, encoding="utf-8") as h:
             return _main(cfg, h)
     else:
