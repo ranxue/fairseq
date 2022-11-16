@@ -118,6 +118,17 @@ def main(cfg: FairseqConfig) -> None:
         )
     )
 
+    model.trainables = trainable_modules(model)
+    grad_status = status_model_grad(model)
+    if cfg.model.pid or cfg.model.sid:
+        custom_model_grad(model, [True, False, False])
+
+    logger.info("PID:{0}, SID:{1} -> current module grad status, {2}".format(
+        cfg.model.pid, cfg.model.sid, 
+        {k:v for k,v in zip(list(model.trainables.keys()),status_model_grad(model))} 
+        )
+    )
+
     # Load valid dataset (we load training data below, based on the latest checkpoint)
     # We load the valid dataset AFTER building the model
     data_utils.raise_if_valid_subsets_unintentionally_ignored(cfg)
@@ -209,7 +220,7 @@ def main(cfg: FairseqConfig) -> None:
         logger.info("ioPath PathManager finished waiting.")
 
 
-def should_stop_early(cfg: DictConfig, valid_loss: float) -> bool:
+def should_stop_early(cfg: DictConfig, valid_loss: float, trainer: Optional[Trainer]=None) -> bool:
     # skip check if no validation was done in the current epoch
     if valid_loss is None:
         return False
@@ -227,12 +238,50 @@ def should_stop_early(cfg: DictConfig, valid_loss: float) -> bool:
     else:
         should_stop_early.num_runs += 1
         if should_stop_early.num_runs >= cfg.checkpoint.patience:
-            logger.info(
-                "early stop since valid performance hasn't improved for last {} runs".format(
-                    cfg.checkpoint.patience
+            if trainer is not None and (cfg.model.pid or cfg.model.sid):    # PID, SID
+                grad_status = status_model_grad(trainer.model)
+                latest_layer = len(grad_status)-1-grad_status[::-1].index(True)
+
+                if latest_layer+1 == len(grad_status):      # last module(/layer) updated
+                    if sum(grad_status) == len(grad_status):
+                        logger.info(
+                            "early stop since valid performance hasn't improved for last {} runs".format(
+                                cfg.checkpoint.patience
+                            )
+                        )
+                        return True
+                    else:
+                        grad_status = [True for _ in grad_status]   # PID
+                        custom_model_grad(trainer.model,grad_status)
+                        logger.info("PID Individual module training complete -> since valid performance hasn't improved for last {} runs".format(cfg.checkpoint.patience))
+                        logger.info("PID:{0}, SID:{1} -> current module grad status, {2}".format(
+                            cfg.model.pid, cfg.model.sid, 
+                            {k:v for k,v in zip(list(trainer.model.trainables.keys()),status_model_grad(trainer.model))} 
+                            )
+                        )
+                        return False
+                else:
+                    if cfg.model.pid:
+                        grad_status = [False for _ in grad_status]    
+                    grad_status[latest_layer+1] = True
+                    custom_model_grad(trainer.model,grad_status)
+                    logger.info("Module:{} - training complete -> since valid performance hasn't improved for last {} runs".format( 
+                        list(trainer.model.trainables.keys())[latest_layer], cfg.checkpoint.patience)
+                    )
+                    logger.info("PID:{0}, SID:{1} -> current module grad status, {2}".format(
+                        cfg.model.pid, cfg.model.sid, 
+                        {k:v for k,v in zip(list(trainer.model.trainables.keys()),status_model_grad(trainer.model))} 
+                        )
+                    )
+                    return False
+                
+            else:
+                logger.info(
+                    "early stop since valid performance hasn't improved for last {} runs".format(
+                        cfg.checkpoint.patience
+                    )
                 )
-            )
-            return True
+                return True
         else:
             return False
 
@@ -404,7 +453,7 @@ def validate_and_save(
     if do_validate:
         valid_losses = validate(cfg, trainer, task, epoch_itr, valid_subsets)
 
-    should_stop |= should_stop_early(cfg, valid_losses[0])
+    should_stop |= should_stop_early(cfg, valid_losses[0], trainer=trainer)
 
     # Save checkpoint
     if do_save or should_stop:
@@ -501,6 +550,47 @@ def get_valid_stats(
             stats[cfg.checkpoint.best_checkpoint_metric],
         )
     return stats
+
+
+def trainable_modules(
+    model: torch.nn.Module, modules: Optional[List[str]]=['w2v_encoder','adaptor','mbart_encoder', 'spch_decoder']
+) -> Dict[str, Any]:
+    """
+    Return a dict of modules (from the argument) which contains a list of layer names which requires_grad (in LNA) by default
+    """
+    trainable_mod_dict = {m:[] for m in modules}
+    for e,p in enumerate(model.named_parameters()):
+        if p[1].requires_grad:
+            for m in modules:
+                if m in p[0]:
+                    trainable_mod_dict[m].append(p[0])
+
+    trainable_mod_dict['w2v_encoder'].extend(trainable_mod_dict['adaptor'])     # considering 'adapter' as a part of 'w2v_encoder'
+    trainable_mod_dict.pop('adaptor')
+    return trainable_mod_dict
+
+
+def custom_model_grad(model:torch.nn.Module, target:List[bool]) -> None:
+    """
+    Change status (requires_grad) of each modules (a collection of layers) of the model according to the target (True/False)
+    """
+    if len(target) != len(list(model.trainables.keys())):
+        logger.error("Num of Trainable Layer Types must be same target!")
+    for layer_type, grad in zip(model.trainables.keys(), target):
+        for p in model.named_parameters():
+            if p[0] in model.trainables[layer_type]:
+                p[1].requires_grad = grad
+
+
+def status_model_grad(model:torch.nn.Module) -> List[Any]:
+    """
+    Return True/False status (requires_grad) of each modules (a collection of layers) of the model
+    """
+    grad_status = []
+    for layer_type in model.trainables.keys():
+        all_grad_status = [p[1].requires_grad for p in model.named_parameters() if p[0] in model.trainables[layer_type]]
+        grad_status.append(all(all_grad_status))
+    return grad_status
 
 
 def cli_main(
